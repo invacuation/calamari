@@ -133,7 +133,10 @@ def test_poll_device_auth_expired():
 
 
 @respx.mock
-def test_submit_reading_success():
+def test_submit_new_reading():
+    respx.get(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
+        return_value=httpx.Response(200, json={"readings": []})
+    )
     respx.post(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
         return_value=httpx.Response(
             200,
@@ -152,7 +155,61 @@ def test_submit_reading_success():
 
 
 @respx.mock
+def test_submit_reading_updates_existing():
+    respx.get(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
+        return_value=httpx.Response(
+            200,
+            json={"readings": [{"id": "uuid-1", "date": "2026-04-28", "reading": 100}]},
+        )
+    )
+    route = respx.put(f"{EIQ_BASE}/homes/12345/meterReadings/uuid-1").mock(
+        return_value=httpx.Response(200, json={})
+    )
+
+    client = TadoClient(home_id="12345")
+    client._access_token = "access-123"
+    client.submit_reading(date="2026-04-28", reading=12345)
+
+    assert route.called
+
+
+@respx.mock
+def test_submit_reading_skips_if_same_value():
+    respx.get(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "readings": [{"id": "uuid-1", "date": "2026-04-28", "reading": 12345}]
+            },
+        )
+    )
+
+    client = TadoClient(home_id="12345")
+    client._access_token = "access-123"
+    client.submit_reading(date="2026-04-28", reading=12345)
+
+
+@respx.mock
+def test_submit_reading_skips_if_existing_is_higher():
+    respx.get(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "readings": [{"id": "uuid-1", "date": "2026-04-28", "reading": 99999}]
+            },
+        )
+    )
+
+    client = TadoClient(home_id="12345")
+    client._access_token = "access-123"
+    client.submit_reading(date="2026-04-28", reading=12345)
+
+
+@respx.mock
 def test_submit_reading_rate_limited():
+    respx.get(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
+        return_value=httpx.Response(200, json={"readings": []})
+    )
     respx.post(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
         return_value=httpx.Response(429, headers={"Retry-After": "60"})
     )

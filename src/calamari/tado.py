@@ -101,16 +101,70 @@ class TadoClient:
             logger.error("Device auth failed: %s", body)
             raise RuntimeError(f"Device auth failed: {body.get('error')}")
 
+    def get_readings(self) -> list[dict]:
+        response = self._http.get(
+            f"{EIQ_BASE}/homes/{self._home_id}/meterReadings",
+            headers={"Authorization": f"Bearer {self._access_token}"},
+        )
+        response.raise_for_status()
+        return response.json().get("readings", [])
+
+    def _find_reading_for_date(self, date: str) -> dict | None:
+        readings = self.get_readings()
+        for reading in readings:
+            if reading.get("date") == date:
+                return reading
+        return None
+
     def submit_reading(self, date: str, reading: int) -> None:
-        logger.info("Submitting reading %d for date %s to Tado", reading, date)
+        existing = self._find_reading_for_date(date)
+        if existing:
+            if existing["reading"] >= reading:
+                logger.info(
+                    "Existing reading %d for %s is >= new reading %d, skipping",
+                    existing["reading"],
+                    date,
+                    reading,
+                )
+                return
+            logger.info(
+                "Updating existing reading for %s: %d -> %d",
+                date,
+                existing["reading"],
+                reading,
+            )
+            self._update_reading(existing["id"], date, reading)
+        else:
+            logger.info("Submitting new reading %d for %s", reading, date)
+            self._create_reading(date, reading)
+
+    def _create_reading(self, date: str, reading: int) -> None:
         response = self._http.post(
             f"{EIQ_BASE}/homes/{self._home_id}/meterReadings",
             headers={"Authorization": f"Bearer {self._access_token}"},
             json={"date": date, "reading": reading},
         )
+        self._handle_response(response)
+        logger.info("Reading submitted successfully")
+
+    def _update_reading(self, reading_id: str, date: str, reading: int) -> None:
+        response = self._http.put(
+            f"{EIQ_BASE}/homes/{self._home_id}/meterReadings/{reading_id}",
+            headers={"Authorization": f"Bearer {self._access_token}"},
+            json={"date": date, "reading": reading},
+        )
+        self._handle_response(response)
+        logger.info("Reading updated successfully")
+
+    def _handle_response(self, response: httpx.Response) -> None:
         if response.status_code == 429:
             retry_after = response.headers.get("Retry-After", "unknown")
             logger.warning("Rate limited by Tado. Retry-After: %s", retry_after)
             raise RuntimeError(f"Rate limited by Tado (retry after {retry_after}s)")
+        if not response.is_success:
+            logger.error(
+                "Tado request failed (%d): %s",
+                response.status_code,
+                response.text,
+            )
         response.raise_for_status()
-        logger.info("Reading submitted successfully")
