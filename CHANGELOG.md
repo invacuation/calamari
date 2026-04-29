@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/invacuation/calamari/compare/v0.1.2...v0.2.0) (2026-04-29)
+
+
+### Features
+
+* submit readings every 3 hours with update logic ([#14](https://github.com/invacuation/calamari/issues/14)) ([7969ce4](https://github.com/invacuation/calamari/commit/7969ce4c240e394ad73b07769146ac60d2779c6a))
+
+
+### Bug Fixes
+
+* handle duplicate Tado readings by updating existing ([#12](https://github.com/invacuation/calamari/issues/12)) ([41fb42a](https://github.com/invacuation/calamari/commit/41fb42a2606c0f2805de194798dddddc4c3cb205))
+
 ## [0.1.2](https://github.com/invacuation/calamari/compare/v0.1.1...v0.1.2) (2026-04-29)
 
 

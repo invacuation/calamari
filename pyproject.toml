@@ -1,6 +1,6 @@
 [project]
 name = "calamari"
-version = "0.1.2"
+version = "0.2.0"
 description = "Octopus Energy to Tado Energy IQ gas meter reading sync"
 requires-python = ">=3.13"
 dependencies = [
