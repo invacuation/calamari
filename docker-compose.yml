@@ -1,0 +1,11 @@
+services:
+  calamari:
+    build: .
+    volumes:
+      - calamari-data:/data
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  calamari-data:
