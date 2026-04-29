@@ -112,5 +112,11 @@ class TadoClient:
             retry_after = response.headers.get("Retry-After", "unknown")
             logger.warning("Rate limited by Tado. Retry-After: %s", retry_after)
             raise RuntimeError(f"Rate limited by Tado (retry after {retry_after}s)")
+        if not response.is_success:
+            logger.error(
+                "Tado submission failed (%d): %s",
+                response.status_code,
+                response.text,
+            )
         response.raise_for_status()
         logger.info("Reading submitted successfully")

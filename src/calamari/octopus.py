@@ -110,6 +110,12 @@ class OctopusClient:
             logger.warning("No gas meter readings found")
             return None
         node = edges[0]["node"]
+        logger.info(
+            "Raw reading data: readAt=%s, source=%s, registers=%s",
+            node["readAt"],
+            node.get("readingSource"),
+            node["registers"],
+        )
         raw_value = float(node["registers"][0]["value"])
         return {
             "read_at": node["readAt"],
