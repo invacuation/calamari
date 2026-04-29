@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/invacuation/calamari/compare/v0.1.0...v0.1.1) (2026-04-29)
+
+
+### Bug Fixes
+
+* use clean semver tags for Docker images ([#6](https://github.com/invacuation/calamari/issues/6)) ([95a8480](https://github.com/invacuation/calamari/commit/95a8480d95ae1eab6aea74280dd361523088aa3e))
+
 ## 0.1.0 (2026-04-29)
 
 
