@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/invacuation/calamari/compare/v0.2.0...v0.2.1) (2026-04-29)
+
+
+### Bug Fixes
+
+* refresh Tado access token per-cycle and auto-retry 401s ([#15](https://github.com/invacuation/calamari/issues/15)) ([1f44b47](https://github.com/invacuation/calamari/commit/1f44b47ae19edc2e02f7e16053604a01eed1116a))
+
 ## [0.2.0](https://github.com/invacuation/calamari/compare/v0.1.2...v0.2.0) (2026-04-29)
 
 
