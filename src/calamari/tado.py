@@ -62,7 +62,9 @@ class TadoClient:
             logger.error("Device auth request failed: %s", response.text)
             response.raise_for_status()
         data = response.json()
-        url = f"{data['verification_uri']}?userCode={data['user_code']}&client_id={CLIENT_ID}"
+        verification_uri = data["verification_uri"]
+        user_code = data["user_code"]
+        url = f"{verification_uri}?userCode={user_code}&client_id={CLIENT_ID}"
         logger.info("")
         logger.info("============================================")
         logger.info("  TADO AUTHENTICATION REQUIRED")
