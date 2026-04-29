@@ -82,6 +82,44 @@ def _handle_signal(signum, frame):
     _shutdown = True
 
 
+def try_submit(
+    octopus: OctopusClient,
+    tado: TadoClient,
+    meter_id: str,
+    state: dict,
+    state_path: Path,
+) -> None:
+    if not octopus.check_rate_limit():
+        logger.warning("Octopus rate limited, will retry next cycle")
+        return
+
+    try:
+        tado.refresh()
+    except RuntimeError as e:
+        logger.error("Tado token refresh failed, skipping cycle: %s", e)
+        return
+
+    reading = octopus.get_latest_reading(meter_id)
+    if not reading:
+        logger.warning("No reading available from Octopus")
+        return
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    logger.info("Got reading: %d (read at %s)", reading["value"], reading["read_at"])
+
+    def submit():
+        tado.submit_reading(date=today, reading=reading["value"])
+        return True
+
+    result = retry_with_backoff(submit)
+    if result:
+        state["last_submission_date"] = today
+        state["last_reading_value"] = reading["value"]
+        save_state(state_path, state)
+    else:
+        logger.error("Failed to submit reading after retries")
+
+
 def main():
     logging.basicConfig(
         level=logging.INFO,
@@ -99,7 +137,10 @@ def main():
         api_key=config["octopus_api_key"],
         account_number=config["octopus_account_number"],
     )
-    tado = TadoClient(home_id=config["tado_home_id"])
+    tado = TadoClient(
+        home_id=config["tado_home_id"],
+        on_tokens_refreshed=lambda tokens: save_tokens(token_path, tokens),
+    )
 
     # Authenticate Octopus
     octopus.authenticate()
@@ -115,8 +156,7 @@ def main():
     tokens = load_tokens(token_path)
     if tokens and tokens.get("refresh_token"):
         try:
-            new_tokens = tado.refresh_access_token(tokens["refresh_token"])
-            save_tokens(token_path, new_tokens)
+            tado.refresh_access_token(tokens["refresh_token"])
             logger.info("Tado token refresh successful")
         except RuntimeError:
             logger.warning("Tado token refresh failed, starting device auth")
@@ -134,36 +174,9 @@ def main():
     # Main loop
     state = load_state(state_path)
 
-    def try_submit():
-        if not octopus.check_rate_limit():
-            logger.warning("Octopus rate limited, will retry next cycle")
-            return
-
-        reading = octopus.get_latest_reading(meter_id)
-        if not reading:
-            logger.warning("No reading available from Octopus")
-            return
-
-        today = datetime.now().strftime("%Y-%m-%d")
-        logger.info(
-            "Got reading: %d (read at %s)", reading["value"], reading["read_at"]
-        )
-
-        def submit():
-            tado.submit_reading(date=today, reading=reading["value"])
-            return True
-
-        result = retry_with_backoff(submit)
-        if result:
-            state["last_submission_date"] = today
-            state["last_reading_value"] = reading["value"]
-            save_state(state_path, state)
-        else:
-            logger.error("Failed to submit reading after retries")
-
     if config["submit_on_startup"]:
         logger.info("SUBMIT_ON_STARTUP is set, submitting immediately")
-        try_submit()
+        try_submit(octopus, tado, meter_id, state, state_path)
 
     logger.info(
         "Entering main loop. Submit schedule: %s",
@@ -181,6 +194,6 @@ def main():
         if _shutdown:
             break
 
-        try_submit()
+        try_submit(octopus, tado, meter_id, state, state_path)
 
     logger.info("Shutdown complete")

@@ -1,10 +1,15 @@
 import os
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from calamari.main import load_config, retry_with_backoff, seconds_until_next_submit
+from calamari.main import (
+    load_config,
+    retry_with_backoff,
+    seconds_until_next_submit,
+    try_submit,
+)
 
 
 def test_load_config_all_set():
@@ -136,3 +141,64 @@ def test_retry_with_backoff_exhausted():
 
     result = retry_with_backoff(action, initial_delay=0, max_delay=0, max_window=0)
     assert result is None
+
+
+def _ok_octopus():
+    octopus = MagicMock()
+    octopus.check_rate_limit.return_value = True
+    octopus.get_latest_reading.return_value = {
+        "value": 100,
+        "read_at": "2026-04-29T00:00:00+00:00",
+    }
+    return octopus
+
+
+def test_try_submit_refreshes_tado_before_submitting(tmp_path):
+    octopus = _ok_octopus()
+    tado = MagicMock()
+
+    try_submit(
+        octopus=octopus,
+        tado=tado,
+        meter_id="meter-1",
+        state={},
+        state_path=tmp_path / "state.json",
+    )
+
+    tado.refresh.assert_called_once()
+    tado.submit_reading.assert_called_once()
+
+
+def test_try_submit_skips_when_refresh_fails(tmp_path):
+    octopus = _ok_octopus()
+    tado = MagicMock()
+    tado.refresh.side_effect = RuntimeError("invalid_grant")
+
+    try_submit(
+        octopus=octopus,
+        tado=tado,
+        meter_id="meter-1",
+        state={},
+        state_path=tmp_path / "state.json",
+    )
+
+    octopus.get_latest_reading.assert_not_called()
+    tado.submit_reading.assert_not_called()
+
+
+def test_try_submit_skips_when_octopus_rate_limited(tmp_path):
+    octopus = MagicMock()
+    octopus.check_rate_limit.return_value = False
+    tado = MagicMock()
+
+    try_submit(
+        octopus=octopus,
+        tado=tado,
+        meter_id="meter-1",
+        state={},
+        state_path=tmp_path / "state.json",
+    )
+
+    tado.refresh.assert_not_called()
+    octopus.get_latest_reading.assert_not_called()
+    tado.submit_reading.assert_not_called()
