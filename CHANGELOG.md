@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/invacuation/calamari/compare/v0.1.1...v0.1.2) (2026-04-29)
+
+
+### Bug Fixes
+
+* build multi-arch Docker images for amd64 and arm64 ([#9](https://github.com/invacuation/calamari/issues/9)) ([95f5971](https://github.com/invacuation/calamari/commit/95f5971fa7c1b37baa4e793f4dae5c409ac86846))
+
 ## [0.1.1](https://github.com/invacuation/calamari/compare/v0.1.0...v0.1.1) (2026-04-29)
 
 
