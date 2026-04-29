@@ -28,7 +28,6 @@ def load_config() -> dict:
         "octopus_api_key": os.environ["OCTOPUS_API_KEY"],
         "octopus_account_number": os.environ["OCTOPUS_ACCOUNT_NUMBER"],
         "tado_home_id": os.environ.get("TADO_HOME_ID"),
-        "submit_hour": int(os.environ.get("SUBMIT_HOUR", "21")),
         "tado_token_file": os.environ.get("TADO_TOKEN_FILE", "/data/tado_tokens.json"),
         "state_file": os.environ.get("STATE_FILE", "/data/state.json"),
         "submit_on_startup": os.environ.get("SUBMIT_ON_STARTUP", "").lower()
@@ -58,12 +57,20 @@ def retry_with_backoff(
             delay = min(delay * 2, max_delay) if max_delay > 0 else 0
 
 
-def seconds_until_hour(hour: int, now: datetime | None = None) -> int:
+SUBMIT_HOURS = [0, 3, 6, 9, 12, 15, 18, 21]
+
+
+def seconds_until_next_submit(now: datetime | None = None) -> tuple[int, int]:
     now = now or datetime.now()
-    target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-    if target <= now:
-        target += timedelta(days=1)
-    return int((target - now).total_seconds())
+    for hour in SUBMIT_HOURS:
+        target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+        if target > now:
+            return int((target - now).total_seconds()), hour
+    # All hours today have passed, next is midnight tomorrow
+    target = (now + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return int((target - now).total_seconds()), 0
 
 
 _shutdown = False
@@ -128,11 +135,6 @@ def main():
     state = load_state(state_path)
 
     def try_submit():
-        today = datetime.now().strftime("%Y-%m-%d")
-        if state.get("last_submission_date") == today:
-            logger.info("Already submitted today (%s), skipping", today)
-            return
-
         if not octopus.check_rate_limit():
             logger.warning("Octopus rate limited, will retry next cycle")
             return
@@ -142,6 +144,7 @@ def main():
             logger.warning("No reading available from Octopus")
             return
 
+        today = datetime.now().strftime("%Y-%m-%d")
         logger.info(
             "Got reading: %d (read at %s)", reading["value"], reading["read_at"]
         )
@@ -155,25 +158,21 @@ def main():
             state["last_submission_date"] = today
             state["last_reading_value"] = reading["value"]
             save_state(state_path, state)
-            logger.info(
-                "Successfully submitted reading %d for %s",
-                reading["value"],
-                today,
-            )
         else:
-            logger.error(
-                "Failed to submit reading after retries, will try again tomorrow"
-            )
+            logger.error("Failed to submit reading after retries")
 
     if config["submit_on_startup"]:
         logger.info("SUBMIT_ON_STARTUP is set, submitting immediately")
         try_submit()
 
-    logger.info("Entering main loop. Submit hour: %d:00", config["submit_hour"])
+    logger.info(
+        "Entering main loop. Submit schedule: %s",
+        ", ".join(f"{h:02d}:00" for h in SUBMIT_HOURS),
+    )
 
     while not _shutdown:
-        wait = seconds_until_hour(config["submit_hour"])
-        logger.info("Sleeping %d seconds until %d:00", wait, config["submit_hour"])
+        wait, next_hour = seconds_until_next_submit()
+        logger.info("Sleeping %d seconds until %02d:00", wait, next_hour)
 
         sleep_end = time.monotonic() + wait
         while time.monotonic() < sleep_end and not _shutdown:
