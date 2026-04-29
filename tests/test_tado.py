@@ -218,3 +218,174 @@ def test_submit_reading_rate_limited():
     client._access_token = "access-123"
     with pytest.raises(RuntimeError, match="Rate limited"):
         client.submit_reading(date="2026-04-28", reading=12345)
+
+
+@respx.mock
+def test_refresh_access_token_invokes_callback():
+    respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "new-access",
+                "refresh_token": "new-refresh",
+                "expires_in": 1800,
+            },
+        )
+    )
+
+    saved = []
+    client = TadoClient(home_id="12345", on_tokens_refreshed=saved.append)
+    client.refresh_access_token("old-refresh")
+
+    assert len(saved) == 1
+    assert saved[0]["access_token"] == "new-access"
+    assert saved[0]["refresh_token"] == "new-refresh"
+
+
+@respx.mock
+def test_refresh_method_uses_stored_token():
+    respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "rotated-access",
+                "refresh_token": "rotated-refresh",
+                "expires_in": 1800,
+            },
+        )
+    )
+
+    client = TadoClient(home_id="12345")
+    client._refresh_token = "stored-refresh"
+
+    client.refresh()
+
+    assert client._access_token == "rotated-access"
+    assert client._refresh_token == "rotated-refresh"
+
+
+def test_refresh_method_raises_without_stored_token():
+    client = TadoClient(home_id="12345")
+    with pytest.raises(RuntimeError, match="No refresh token"):
+        client.refresh()
+
+
+@respx.mock
+def test_get_readings_retries_on_401():
+    readings_route = respx.get(f"{EIQ_BASE}/homes/12345/meterReadings")
+    readings_route.side_effect = [
+        httpx.Response(401, json={"error": "Unauthorized"}),
+        httpx.Response(
+            200,
+            json={"readings": [{"id": "uuid-1", "date": "2026-04-28", "reading": 100}]},
+        ),
+    ]
+    refresh_route = respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "fresh-access",
+                "refresh_token": "fresh-refresh",
+                "expires_in": 1800,
+            },
+        )
+    )
+
+    client = TadoClient(home_id="12345")
+    client._access_token = "stale-access"
+    client._refresh_token = "valid-refresh"
+
+    readings = client.get_readings()
+
+    assert readings == [{"id": "uuid-1", "date": "2026-04-28", "reading": 100}]
+    assert client._access_token == "fresh-access"
+    assert refresh_route.called
+    assert readings_route.call_count == 2
+
+
+@respx.mock
+def test_create_reading_retries_on_401():
+    respx.get(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
+        return_value=httpx.Response(200, json={"readings": []})
+    )
+    create_route = respx.post(f"{EIQ_BASE}/homes/12345/meterReadings")
+    create_route.side_effect = [
+        httpx.Response(401, json={"error": "Unauthorized"}),
+        httpx.Response(
+            200,
+            json={
+                "id": "uuid-1",
+                "homeId": 12345,
+                "reading": 12345,
+                "date": "2026-04-28",
+            },
+        ),
+    ]
+    refresh_route = respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "fresh-access",
+                "refresh_token": "fresh-refresh",
+                "expires_in": 1800,
+            },
+        )
+    )
+
+    client = TadoClient(home_id="12345")
+    client._access_token = "stale-access"
+    client._refresh_token = "valid-refresh"
+
+    client.submit_reading(date="2026-04-28", reading=12345)
+
+    assert refresh_route.called
+    assert create_route.call_count == 2
+
+
+@respx.mock
+def test_update_reading_retries_on_401():
+    respx.get(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
+        return_value=httpx.Response(
+            200,
+            json={"readings": [{"id": "uuid-1", "date": "2026-04-28", "reading": 100}]},
+        )
+    )
+    update_route = respx.put(f"{EIQ_BASE}/homes/12345/meterReadings/uuid-1")
+    update_route.side_effect = [
+        httpx.Response(401, json={"error": "Unauthorized"}),
+        httpx.Response(200, json={}),
+    ]
+    refresh_route = respx.post(TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "fresh-access",
+                "refresh_token": "fresh-refresh",
+                "expires_in": 1800,
+            },
+        )
+    )
+
+    client = TadoClient(home_id="12345")
+    client._access_token = "stale-access"
+    client._refresh_token = "valid-refresh"
+
+    client.submit_reading(date="2026-04-28", reading=12345)
+
+    assert refresh_route.called
+    assert update_route.call_count == 2
+
+
+@respx.mock
+def test_401_without_refresh_token_propagates():
+    respx.get(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
+        return_value=httpx.Response(401, json={"error": "Unauthorized"})
+    )
+
+    client = TadoClient(home_id="12345")
+    client._access_token = "stale-access"
+    # No _refresh_token set
+
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        client.get_readings()
+    assert exc_info.value.response.status_code == 401

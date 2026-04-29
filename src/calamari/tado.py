@@ -1,5 +1,6 @@
 import logging
 import time
+from collections.abc import Callable
 
 import httpx
 
@@ -12,9 +13,15 @@ EIQ_BASE = "https://energy-insights.tado.com/api"
 
 
 class TadoClient:
-    def __init__(self, home_id: str | None = None):
+    def __init__(
+        self,
+        home_id: str | None = None,
+        on_tokens_refreshed: Callable[[dict], None] | None = None,
+    ):
         self._home_id = home_id
         self._access_token: str | None = None
+        self._refresh_token: str | None = None
+        self._on_tokens_refreshed = on_tokens_refreshed
         self._http = httpx.Client(timeout=30)
 
     def get_home_id(self) -> str:
@@ -49,8 +56,17 @@ class TadoClient:
 
         data = response.json()
         self._access_token = data["access_token"]
+        if "refresh_token" in data:
+            self._refresh_token = data["refresh_token"]
+        if self._on_tokens_refreshed is not None:
+            self._on_tokens_refreshed(data)
         logger.info("Tado token refreshed successfully")
         return data
+
+    def refresh(self) -> dict:
+        if not self._refresh_token:
+            raise RuntimeError("No refresh token stored")
+        return self.refresh_access_token(self._refresh_token)
 
     def start_device_auth(self) -> dict:
         logger.info("Starting Tado device authorization flow")
@@ -87,6 +103,8 @@ class TadoClient:
             if response.status_code == 200:
                 data = response.json()
                 self._access_token = data["access_token"]
+                if "refresh_token" in data:
+                    self._refresh_token = data["refresh_token"]
                 logger.info("Device authorization successful")
                 return data
 
@@ -101,10 +119,22 @@ class TadoClient:
             logger.error("Device auth failed: %s", body)
             raise RuntimeError(f"Device auth failed: {body.get('error')}")
 
+    def _eiq_request(self, method: str, url: str, **kwargs) -> httpx.Response:
+        headers = {
+            **kwargs.pop("headers", {}),
+            "Authorization": f"Bearer {self._access_token}",
+        }
+        response = self._http.request(method, url, headers=headers, **kwargs)
+        if response.status_code == 401 and self._refresh_token:
+            logger.info("Tado returned 401, refreshing access token and retrying")
+            self.refresh()
+            headers["Authorization"] = f"Bearer {self._access_token}"
+            response = self._http.request(method, url, headers=headers, **kwargs)
+        return response
+
     def get_readings(self) -> list[dict]:
-        response = self._http.get(
-            f"{EIQ_BASE}/homes/{self._home_id}/meterReadings",
-            headers={"Authorization": f"Bearer {self._access_token}"},
+        response = self._eiq_request(
+            "GET", f"{EIQ_BASE}/homes/{self._home_id}/meterReadings"
         )
         response.raise_for_status()
         return response.json().get("readings", [])
@@ -139,18 +169,18 @@ class TadoClient:
             self._create_reading(date, reading)
 
     def _create_reading(self, date: str, reading: int) -> None:
-        response = self._http.post(
+        response = self._eiq_request(
+            "POST",
             f"{EIQ_BASE}/homes/{self._home_id}/meterReadings",
-            headers={"Authorization": f"Bearer {self._access_token}"},
             json={"date": date, "reading": reading},
         )
         self._handle_response(response)
         logger.info("Reading submitted successfully")
 
     def _update_reading(self, reading_id: str, date: str, reading: int) -> None:
-        response = self._http.put(
+        response = self._eiq_request(
+            "PUT",
             f"{EIQ_BASE}/homes/{self._home_id}/meterReadings/{reading_id}",
-            headers={"Authorization": f"Bearer {self._access_token}"},
             json={"date": date, "reading": reading},
         )
         self._handle_response(response)
