@@ -119,11 +119,12 @@ class TadoClient:
     def submit_reading(self, date: str, reading: int) -> None:
         existing = self._find_reading_for_date(date)
         if existing:
-            if existing["reading"] == reading:
+            if existing["reading"] >= reading:
                 logger.info(
-                    "Reading %d already exists for %s, skipping",
-                    reading,
+                    "Existing reading %d for %s is >= new reading %d, skipping",
+                    existing["reading"],
                     date,
+                    reading,
                 )
                 return
             logger.info(

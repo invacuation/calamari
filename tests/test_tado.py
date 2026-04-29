@@ -190,6 +190,22 @@ def test_submit_reading_skips_if_same_value():
 
 
 @respx.mock
+def test_submit_reading_skips_if_existing_is_higher():
+    respx.get(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "readings": [{"id": "uuid-1", "date": "2026-04-28", "reading": 99999}]
+            },
+        )
+    )
+
+    client = TadoClient(home_id="12345")
+    client._access_token = "access-123"
+    client.submit_reading(date="2026-04-28", reading=12345)
+
+
+@respx.mock
 def test_submit_reading_rate_limited():
     respx.get(f"{EIQ_BASE}/homes/12345/meterReadings").mock(
         return_value=httpx.Response(200, json={"readings": []})
