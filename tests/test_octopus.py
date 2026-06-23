@@ -1,3 +1,7 @@
+import base64
+import json
+import time
+
 import httpx
 import pytest
 import respx
@@ -73,7 +77,7 @@ def test_get_meter_info():
     )
 
     client = OctopusClient(api_key="sk_live_test", account_number="A-1234")
-    client._token = "jwt-token-123"
+    client._token = _create_mock_jwt(int(time.time()) + 3600)
     meter_info = client.get_meter_info()
 
     assert meter_info == {
@@ -107,7 +111,7 @@ def test_get_latest_reading():
     )
 
     client = OctopusClient(api_key="sk_live_test", account_number="A-1234")
-    client._token = "jwt-token-123"
+    client._token = _create_mock_jwt(int(time.time()) + 3600)
     reading = client.get_latest_reading(meter_id="42")
 
     assert reading == {"read_at": "2026-04-28T21:00:00+00:00", "value": 12345}
@@ -123,7 +127,7 @@ def test_get_latest_reading_no_readings():
     )
 
     client = OctopusClient(api_key="sk_live_test", account_number="A-1234")
-    client._token = "jwt-token-123"
+    client._token = _create_mock_jwt(int(time.time()) + 3600)
     reading = client.get_latest_reading(meter_id="42")
 
     assert reading is None
@@ -148,7 +152,7 @@ def test_check_rate_limit_ok():
     )
 
     client = OctopusClient(api_key="sk_live_test", account_number="A-1234")
-    client._token = "jwt-token-123"
+    client._token = _create_mock_jwt(int(time.time()) + 3600)
     assert client.check_rate_limit() is True
 
 
@@ -171,5 +175,81 @@ def test_check_rate_limit_blocked():
     )
 
     client = OctopusClient(api_key="sk_live_test", account_number="A-1234")
-    client._token = "jwt-token-123"
+    client._token = _create_mock_jwt(int(time.time()) + 3600)
     assert client.check_rate_limit() is False
+
+
+def _create_mock_jwt(exp: int) -> str:
+    header = (
+        base64.b64encode(json.dumps({"alg": "HS256"}).encode("utf-8"))
+        .decode("utf-8")
+        .replace("=", "")
+    )
+    payload = (
+        base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode("utf-8"))
+        .decode("utf-8")
+        .replace("=", "")
+    )
+    return f"{header}.{payload}.signature"
+
+
+def test_is_token_expired():
+    client = OctopusClient(api_key="sk_live_test", account_number="A-1234")
+
+    # Missing token
+    assert client._is_token_expired() is True
+
+    # Malformed token
+    client._token = "not-a-jwt"
+    assert client._is_token_expired() is True
+
+    # Expired token
+    now = int(time.time())
+    client._token = _create_mock_jwt(now - 10)
+    assert client._is_token_expired() is True
+
+    # Token expiring soon (within 60 second buffer)
+    client._token = _create_mock_jwt(now + 30)
+    assert client._is_token_expired() is True
+
+    # Valid token
+    client._token = _create_mock_jwt(now + 3600)
+    assert client._is_token_expired() is False
+
+
+@respx.mock
+def test_ensure_authenticated_needs_auth():
+    # Mock authentication call
+    respx.post(GRAPHQL_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "obtainKrakenToken": {
+                        "token": _create_mock_jwt(int(time.time()) + 3600),
+                        "refreshToken": "refresh-456",
+                        "refreshExpiresIn": 99999,
+                    }
+                }
+            },
+        )
+    )
+
+    client = OctopusClient(api_key="sk_live_test", account_number="A-1234")
+
+    # Token is None -> calls authenticate
+    client.ensure_authenticated()
+    assert client._token is not None
+    assert not client._is_token_expired()
+
+
+@respx.mock
+def test_ensure_authenticated_already_valid():
+    client = OctopusClient(api_key="sk_live_test", account_number="A-1234")
+    valid_token = _create_mock_jwt(int(time.time()) + 3600)
+    client._token = valid_token
+
+    # Since token is valid, ensure_authenticated should not call authenticate.
+    # We don't mock any respx endpoint, so if it makes a request, it would fail.
+    client.ensure_authenticated()
+    assert client._token == valid_token

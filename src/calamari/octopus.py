@@ -1,5 +1,8 @@
+import base64
+import json
 import logging
 import math
+import time
 
 import httpx
 
@@ -85,6 +88,27 @@ class OctopusClient:
         self._refresh_token = token_data["refreshToken"]
         logger.info("Authenticated successfully")
 
+    def _is_token_expired(self) -> bool:
+        if not self._token:
+            return True
+        try:
+            parts = self._token.split(".")
+            if len(parts) < 2:
+                return True
+            payload_b64 = parts[1]
+            payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+            payload = json.loads(
+                base64.urlsafe_b64decode(payload_b64.encode("utf-8")).decode("utf-8")
+            )
+            return time.time() >= payload.get("exp", 0) - 60
+        except Exception:
+            logger.warning("Failed to decode JWT token, assuming expired")
+            return True
+
+    def ensure_authenticated(self) -> None:
+        if not self._token or self._is_token_expired():
+            self.authenticate()
+
     def get_meter_info(self) -> dict:
         logger.info("Fetching gas meter info for account %s", self._account_number)
         result = self._graphql(
@@ -130,6 +154,9 @@ class OctopusClient:
     def _graphql(
         self, query: str, variables: dict | None = None, authenticated: bool = True
     ) -> dict:
+        if authenticated:
+            self.ensure_authenticated()
+
         headers = {}
         if authenticated and self._token:
             headers["Authorization"] = f"JWT {self._token}"

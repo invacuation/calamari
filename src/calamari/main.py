@@ -104,16 +104,16 @@ def try_submit(
         logger.warning("No reading available from Octopus")
         return
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    reading_date = reading["read_at"].split("T")[0]
     logger.info("Got reading: %d (read at %s)", reading["value"], reading["read_at"])
 
     def submit():
-        tado.submit_reading(date=today, reading=reading["value"])
+        tado.submit_reading(date=reading_date, reading=reading["value"])
         return True
 
     result = retry_with_backoff(submit)
     if result:
-        state["last_submission_date"] = today
+        state["last_submission_date"] = reading_date
         state["last_reading_value"] = reading["value"]
         save_state(state_path, state)
     else:
