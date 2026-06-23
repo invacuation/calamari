@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/invacuation/calamari/compare/v0.2.1...v0.2.2) (2026-06-23)
+
+
+### Bug Fixes
+
+* **submissions:** submit the latest reading only when it's present ([#17](https://github.com/invacuation/calamari/issues/17)) ([15e1fbb](https://github.com/invacuation/calamari/commit/15e1fbb43cf2bb03aff7320b40ce41d4bb3fa17d))
+
 ## [0.2.1](https://github.com/invacuation/calamari/compare/v0.2.0...v0.2.1) (2026-04-29)
 
 
