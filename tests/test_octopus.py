@@ -180,30 +180,38 @@ def test_check_rate_limit_blocked():
 
 
 def _create_mock_jwt(exp: int) -> str:
-    header = base64.b64encode(json.dumps({"alg": "HS256"}).encode("utf-8")).decode("utf-8").replace("=", "")
-    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode("utf-8")).decode("utf-8").replace("=", "")
+    header = (
+        base64.b64encode(json.dumps({"alg": "HS256"}).encode("utf-8"))
+        .decode("utf-8")
+        .replace("=", "")
+    )
+    payload = (
+        base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode("utf-8"))
+        .decode("utf-8")
+        .replace("=", "")
+    )
     return f"{header}.{payload}.signature"
 
 
 def test_is_token_expired():
     client = OctopusClient(api_key="sk_live_test", account_number="A-1234")
-    
+
     # Missing token
     assert client._is_token_expired() is True
-    
+
     # Malformed token
     client._token = "not-a-jwt"
     assert client._is_token_expired() is True
-    
+
     # Expired token
     now = int(time.time())
     client._token = _create_mock_jwt(now - 10)
     assert client._is_token_expired() is True
-    
+
     # Token expiring soon (within 60 second buffer)
     client._token = _create_mock_jwt(now + 30)
     assert client._is_token_expired() is True
-    
+
     # Valid token
     client._token = _create_mock_jwt(now + 3600)
     assert client._is_token_expired() is False
@@ -228,7 +236,7 @@ def test_ensure_authenticated_needs_auth():
     )
 
     client = OctopusClient(api_key="sk_live_test", account_number="A-1234")
-    
+
     # Token is None -> calls authenticate
     client.ensure_authenticated()
     assert client._token is not None
@@ -240,9 +248,8 @@ def test_ensure_authenticated_already_valid():
     client = OctopusClient(api_key="sk_live_test", account_number="A-1234")
     valid_token = _create_mock_jwt(int(time.time()) + 3600)
     client._token = valid_token
-    
-    # Since token is valid, ensure_authenticated should not call authenticate (no requests made)
-    # We don't mock any respx endpoint, so if it makes a request, it would fail
+
+    # Since token is valid, ensure_authenticated should not call authenticate.
+    # We don't mock any respx endpoint, so if it makes a request, it would fail.
     client.ensure_authenticated()
     assert client._token == valid_token
-
