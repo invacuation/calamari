@@ -157,16 +157,19 @@ def test_try_submit_refreshes_tado_before_submitting(tmp_path):
     octopus = _ok_octopus()
     tado = MagicMock()
 
+    state = {}
     try_submit(
         octopus=octopus,
         tado=tado,
         meter_id="meter-1",
-        state={},
+        state=state,
         state_path=tmp_path / "state.json",
     )
 
     tado.refresh.assert_called_once()
-    tado.submit_reading.assert_called_once()
+    tado.submit_reading.assert_called_once_with(date="2026-04-29", reading=100)
+    assert state["last_submission_date"] == "2026-04-29"
+    assert state["last_reading_value"] == 100
 
 
 def test_try_submit_skips_when_refresh_fails(tmp_path):
